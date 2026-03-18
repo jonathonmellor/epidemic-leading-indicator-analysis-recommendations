@@ -1,9 +1,12 @@
 # Script to generate maps demonstrating differences in geographies.
 # Compare two different English geographies visually and how they overlap.
 
+# note: will need many tidyverse packages
 library(sf)
 library(patchwork)
 library(ggplot2)
+library(fs)
+
 
 output_dir <- fs::dir_create(here::here("methods", "leading-indicator", "output"))
 
@@ -27,7 +30,6 @@ lad24_uk_buc <- sf::st_read(lad24_uk_buc_url) |>
 # bring in scotland and wales for context
 country <- lad24_uk_buc |>
   dplyr::filter(stringr::str_starts(lad24cd, "W") | stringr::str_starts(lad24cd, "S")) |>
-  dplyr::collect() |>
   dplyr::mutate(
     name = dplyr::case_when(
       stringr::str_starts(lad24cd, "W") ~ "Wales",
@@ -57,7 +59,6 @@ regions <- sf::st_read(nhser24_en_buc_url) |>
 # bring in the English local authorities
 local_authorities <- lad24_uk_buc |>
   dplyr::filter(stringr::str_starts(lad24cd, "E")) |>
-  dplyr::collect() |>
   dplyr::mutate(type = "Local authorities") |>
   sf::st_sf(crs = "epsg:4326") |>
   sf::st_make_valid() |>

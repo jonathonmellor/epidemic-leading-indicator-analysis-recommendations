@@ -10,6 +10,8 @@ library(patchwork)
 # used for ccf_boot
 library(funtimes)
 library(socialmixr)
+library(fs)
+library(zoo)
 
 theme_set(theme_bw())
 
