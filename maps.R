@@ -8,7 +8,7 @@ library(ggplot2)
 library(fs)
 
 
-output_dir <- fs::dir_create(here::here("methods", "leading-indicator", "output"))
+output_dir <- fs::dir_create(here::here("outputs"))
 
 
 set.seed(07734)

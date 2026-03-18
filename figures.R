@@ -18,7 +18,7 @@ theme_set(theme_bw())
 set.seed(07734)
 
 
-output_dir <- fs::dir_create(here::here("methods", "leading-indicator", "output"))
+output_dir <- fs::dir_create(here::here("outputs"))
 # Generate epidemic ####
 
 polymod <- socialmixr::polymod
