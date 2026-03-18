@@ -47,3 +47,10 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+.positai
+
+# Plots
+*.png
+
+# Data
+*.csv
