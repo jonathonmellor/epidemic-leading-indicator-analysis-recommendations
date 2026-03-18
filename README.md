@@ -1,4 +1,4 @@
-# Recommendations for the Analysis of Leading Indicators in Epidemic Surveillance"
+# Recommendations for the Analysis of Leading Indicators in Epidemic Surveillance
 Repository containing simulation code supporting the pre-print "Recommendations for the Analysis of Leading Indicators in Epidemic Surveillance"
 
 # Contents
