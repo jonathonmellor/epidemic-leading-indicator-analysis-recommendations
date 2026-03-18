@@ -3,11 +3,13 @@
 # generate epidemic for modelling using the `epidemics` package getting started example.
 # Then do transformations to it, to demonstrate principles discussed in paper.
 
+# Note you will need tidyverse packages and the below
 library(epidemics)
 library(ggplot2)
 library(patchwork)
 # used for ccf_boot
 library(funtimes)
+library(socialmixr)
 
 theme_set(theme_bw())
 
