@@ -9,6 +9,8 @@ library(fs)
 
 
 output_dir <- fs::dir_create(here::here("outputs"))
+output_dir_tiff <- fs::dir_create(here::here("outputs", "tiff"))
+
 
 
 set.seed(07734)
@@ -122,6 +124,13 @@ combined_plot
 
 ggplot2::ggsave(
   filename = fs::path(output_dir, "map.png"),
+  plot = combined_plot,
+  width = 8,
+  height = 8
+)
+
+ggplot2::ggsave(
+  filename = fs::path(output_dir_tiff, "map.tiff"),
   plot = combined_plot,
   width = 8,
   height = 8

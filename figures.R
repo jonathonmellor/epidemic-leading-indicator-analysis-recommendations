@@ -19,6 +19,7 @@ set.seed(07734)
 
 
 output_dir <- fs::dir_create(here::here("outputs"))
+output_dir_tiff <- fs::dir_create(here::here("outputs", "tiff"))
 # Generate epidemic ####
 
 polymod <- socialmixr::polymod
@@ -110,7 +111,7 @@ case_identification_delay_shape <- 5
 
 cases <- incidence |>
   # lets assume all cases reported are in the most elderly age group
-  dplyr::filter(demography_group == "40+") |>
+  dplyr::filter(demography_group == "[40,Inf)") |>
   # we need round numbers to work at the individual level later,
   # consider moving earlier in processing.
   dplyr::mutate(value = rpois(n = dplyr::n(), lambda = icr * value)) |>
@@ -152,7 +153,7 @@ reported_cases_report_date <- reporting_rectangle |>
   dplyr::filter(time <= cut_off_time)
 
 combined_delay_cases <- cases |>
-  dplyr::filter(demography_group == "40+") |>
+  dplyr::filter(demography_group == "[40,Inf)") |>
   dplyr::bind_rows(reported_cases, reported_cases_report_date) |>
   tidyr::pivot_wider(values_from = value, names_from = compartment)
 
@@ -229,6 +230,13 @@ ggplot2::ggsave(
   height = 9
 )
 
+ggplot2::ggsave(
+  filename = fs::path(output_dir_tiff, "reporting_delay.tiff"),
+  plot = delay_plot,
+  width = 7,
+  height = 9
+)
+
 
 # Transformations
 # compare incident infections with reported cases on different scales
@@ -240,11 +248,11 @@ noise_sd <- 0.0003
 proxy <- incidence |>
   dplyr::filter(demography_group != "all") |>
   dplyr::mutate(
-    weight = dplyr::case_match(
+    weight = dplyr::recode_values(
       demography_group,
       "[0,20)" ~ 0.7,
       "[20,40)" ~ 0.2,
-      "40+" ~ 0.03
+      "[40,Inf)" ~ 0.03
     )
   ) |>
   # scale and add some noise (because it's a proxy)
@@ -402,6 +410,14 @@ ggplot2::ggsave(
   height = 10
 )
 
+ggplot2::ggsave(
+  filename = fs::path(output_dir_tiff, "transformation.tiff"),
+  plot = transformation_plot,
+  width = 8,
+  height = 10
+)
+
+
 
 # Smoothing & Denoising ####
 # lets take the indicator variable and apply a range of smoothing methods then visualise.
@@ -445,8 +461,17 @@ smooth_plot <- smooth_data |>
   labs(y = "Indicator value", x = "Day") +
   theme(legend.position = "bottom")
 
+smooth_plot
+
 ggplot2::ggsave(
   filename = fs::path(output_dir, "smooth.png"),
+  plot = smooth_plot,
+  width = 10,
+  height = 8
+)
+
+ggplot2::ggsave(
+  filename = fs::path(output_dir_tiff, "smooth.tiff"),
   plot = smooth_plot,
   width = 10,
   height = 8
