@@ -425,42 +425,48 @@ ggplot2::ggsave(
 
 # fit two different gams to demonstrate statistical modelling approaches
 gam_2nd_order <- mgcv::gam(
-  formula = value ~ s(time, bs="tp", m=2),
+  formula = as.formula(log(value) ~ s(time, bs="tp", m=2, k=30)),
   data = transform_data_raw |>
-    dplyr::filter(compartment == "proxy"),
-  family=gaussian(link="log")
+    dplyr::filter(compartment == "proxy",
+                  value !=0),
+  family=gaussian(link="identity")
 )
 
 gam_2nd_order_results <- gratia::add_fitted_samples(object = transform_data_raw |>
                                                       dplyr::filter(compartment == "proxy"),
                                                     model=gam_2nd_order,
                                                     method="mh",
+                                                    scale="response",
                                                     n=1000) |>
   dplyr::summarise(
-    q50=quantile(.fitted, 0.5),
-    q95=quantile(.fitted, 0.95),
-    q5=quantile(.fitted, 0.05),
+    q50=exp(quantile(.fitted, 0.5)),
+    q95=exp(quantile(.fitted, 0.95)),
+    q5=exp(quantile(.fitted, 0.05)),
     .by=c(time, compartment, demography_group)) |>
-  dplyr::mutate(model = "GAM 2nd order CR")
+  dplyr::mutate(model = "GAM 2nd order TP")
 
 gam_1st_order <- mgcv::gam(
-  formula = value ~ s(time, bs="tp", m=1),
+  formula = as.formula(log(value) ~ s(time, bs="tp", m=1, k=30)),
   data = transform_data_raw |>
-    dplyr::filter(compartment == "proxy"),
-  family=gaussian(link="log")
+    dplyr::filter(compartment == "proxy",
+                  value !=0),
+  family=gaussian(link = "identity")
 )
 
 gam_1st_order_results <- gratia::add_fitted_samples(object = transform_data_raw |>
                                                       dplyr::filter(compartment == "proxy"),
                                                     model=gam_1st_order,
+                                                    scale="response",
                                                     method="mh",
                                                     n=1000) |>
   dplyr::summarise(
-    q50=quantile(.fitted, 0.5),
-    q95=quantile(.fitted, 0.95),
-    q5=quantile(.fitted, 0.05),
+    q50=exp(quantile(.fitted, 0.5)),
+    q95=exp(quantile(.fitted, 0.95)),
+    q5=exp(quantile(.fitted, 0.05)),
     .by=c(time, compartment, demography_group)) |>
-  dplyr::mutate(model = "GAM 1st order CR")
+  dplyr::mutate(model = "GAM 1st order TP")
+
+
 
 
 
@@ -475,14 +481,18 @@ gam_results <- dplyr::bind_rows(
                      dplyr::rename(proxy=value),
                    by=c("time", "demography_group"))
 
-gam_results |>
+gam_plot <- gam_results |>
   ggplot() +
+  geom_line(aes(x=time, y=proxy), linewidth=0.8, color="black") +
   geom_line(aes(x=time, y=q50, group=model, color=model)) +
-  geom_ribbon(aes(x=time, ymin=q5, ymax=q95, group=model, fill=model), alpha=0.6) +
-  geom_point(aes(x=time, y=proxy), size=0.5) +
-  coord_cartesian(xlim = c(90, 220))
+  geom_ribbon(aes(x=time, ymin=q5, ymax=q95, group=model, fill=model), alpha=0.5) +
+  coord_cartesian(xlim = c(90, 220)) +
+  scale_fill_brewer(palette="Set1") +
+  labs(y = "Indicator value", x = "Day",
+       title="B.") +
+  theme(legend.position = "bottom")
 
-
+gam_plot
 
 smooth_data <- transform_data_raw |>
   dplyr::select(-compartment_name) |>
@@ -516,27 +526,31 @@ smooth_plot <- smooth_data |>
     ),
     values = c(
       # take colours from Brewer Set1
-      "proxy" = "grey70",
+      "proxy" = "black",
       "proxy_loess" = "#E41A1C",
       "proxy_smooth_7_right" = "#377EB8",
       "proxy_smooth_21_right" = "#984EA3"
     )
   ) +
-  labs(y = "Indicator value", x = "Day") +
+  labs(y = "Indicator value", x = "Day",
+       title = "A.") +
   theme(legend.position = "bottom")
 
 smooth_plot
 
+
+final_smooth_plot <- smooth_plot / gam_plot
+
 ggplot2::ggsave(
   filename = fs::path(output_dir, "smooth.png"),
-  plot = smooth_plot,
+  plot = final_smooth_plot,
   width = 10,
-  height = 8
+  height = 14
 )
 
 ggplot2::ggsave(
   filename = fs::path(output_dir_tiff, "smooth.tiff"),
-  plot = smooth_plot,
+  plot = final_smooth_plot,
   width = 10,
   height = 8
 )
