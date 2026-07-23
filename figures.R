@@ -422,6 +422,68 @@ ggplot2::ggsave(
 # Smoothing & Denoising ####
 # lets take the indicator variable and apply a range of smoothing methods then visualise.
 
+
+# fit two different gams to demonstrate statistical modelling approaches
+gam_2nd_order <- mgcv::gam(
+  formula = value ~ s(time, bs="tp", m=2),
+  data = transform_data_raw |>
+    dplyr::filter(compartment == "proxy"),
+  family=gaussian(link="log")
+)
+
+gam_2nd_order_results <- gratia::add_fitted_samples(object = transform_data_raw |>
+                                                      dplyr::filter(compartment == "proxy"),
+                                                    model=gam_2nd_order,
+                                                    method="mh",
+                                                    n=1000) |>
+  dplyr::summarise(
+    q50=quantile(.fitted, 0.5),
+    q95=quantile(.fitted, 0.95),
+    q5=quantile(.fitted, 0.05),
+    .by=c(time, compartment, demography_group)) |>
+  dplyr::mutate(model = "GAM 2nd order CR")
+
+gam_1st_order <- mgcv::gam(
+  formula = value ~ s(time, bs="tp", m=1),
+  data = transform_data_raw |>
+    dplyr::filter(compartment == "proxy"),
+  family=gaussian(link="log")
+)
+
+gam_1st_order_results <- gratia::add_fitted_samples(object = transform_data_raw |>
+                                                      dplyr::filter(compartment == "proxy"),
+                                                    model=gam_1st_order,
+                                                    method="mh",
+                                                    n=1000) |>
+  dplyr::summarise(
+    q50=quantile(.fitted, 0.5),
+    q95=quantile(.fitted, 0.95),
+    q5=quantile(.fitted, 0.05),
+    .by=c(time, compartment, demography_group)) |>
+  dplyr::mutate(model = "GAM 1st order CR")
+
+
+
+gam_results <- dplyr::bind_rows(
+  gam_1st_order_results,
+  gam_2nd_order_results
+) |>
+  dplyr::select(-compartment) |>
+  dplyr::left_join(transform_data_raw |>
+                     dplyr::filter(compartment == "proxy") |>
+                     dplyr::select(-compartment) |>
+                     dplyr::rename(proxy=value),
+                   by=c("time", "demography_group"))
+
+gam_results |>
+  ggplot() +
+  geom_line(aes(x=time, y=q50, group=model, color=model)) +
+  geom_ribbon(aes(x=time, ymin=q5, ymax=q95, group=model, fill=model), alpha=0.6) +
+  geom_point(aes(x=time, y=proxy), size=0.5) +
+  coord_cartesian(xlim = c(90, 220))
+
+
+
 smooth_data <- transform_data_raw |>
   dplyr::select(-compartment_name) |>
   tidyr::pivot_wider(values_from = value, names_from = compartment) |>
@@ -433,9 +495,11 @@ smooth_data <- transform_data_raw |>
     proxy_smooth_7_right = zoo::rollmean(x = proxy, k = 7, align = "right", na.pad = TRUE),
     proxy_smooth_21_right = zoo::rollmean(x = proxy, k = 21, align = "right", na.pad = TRUE),
     proxy_loess = stats::loess(proxy ~ time, span = 0.1) |>
-      stats::predict(data.frame(year = seq(1, max_time + 1, 1)))
+      stats::predict(data.frame(time = seq(1, max_time + 1, 1)))
   ) |>
   tidyr::pivot_longer(cols = dplyr::contains("proxy"))
+
+
 
 # create plot that emphasises the smooth methods not the raw
 smooth_plot <- smooth_data |>
