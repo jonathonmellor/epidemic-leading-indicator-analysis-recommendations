@@ -27,7 +27,7 @@ contact_data <- socialmixr::contact_matrix(
   polymod,
   countries = "United Kingdom",
   # add in another group for more differentiation
-  age.limits = c(0, 20, 40),
+  age_limits = c(0, 20, 40),
   symmetric = TRUE
 )
 
@@ -65,7 +65,7 @@ uk_population <- population(
 )
 
 
-max_time <- 600
+max_time <- 300
 
 # run an epidemic model using `epidemic`
 output <- model_default(
@@ -242,7 +242,8 @@ ggplot2::ggsave(
 # compare incident infections with reported cases on different scales
 
 # add noise for the signal -> proxy, to make the proxy less reliable
-noise_sd <- 0.0003
+noise_rate <- 10
+noise_shape <- 10
 
 # generate a proxy signal that skews young
 proxy <- incidence |>
@@ -252,13 +253,12 @@ proxy <- incidence |>
       demography_group,
       "[0,20)" ~ 0.7,
       "[20,40)" ~ 0.2,
-      "[40,Inf)" ~ 0.03
+      "[40,Inf)" ~ 0.1
     )
   ) |>
   # scale and add some noise (because it's a proxy)
-  dplyr::summarise(value = sum(rnorm(n = dplyr::n(), mean = 0.001, sd = noise_sd) * value * weight), .by = c("time")) |>
+  dplyr::summarise(value = sum((rgamma(n = dplyr::n(), shape = noise_shape, rate = noise_rate)) * value * weight/1000), .by = c("time")) |>
   # noise approach may add negative values
-  dplyr::mutate(value = dplyr::if_else(value < 0, 0, value)) |>
   dplyr::mutate(demography_group = "all", compartment = "proxy")
 
 # generate reported cases again without cut off
@@ -269,7 +269,7 @@ reported_cases_all <- reporting_rectangle |>
 
 transform_data_raw <- dplyr::bind_rows(proxy, reported_cases_all) |>
   dplyr::mutate(
-    compartment_name = dplyr::case_match(
+    compartment_name = dplyr::recode_values(
       compartment,
       "cases" ~ "Signal",
       "proxy" ~ "Indicator"
@@ -425,32 +425,32 @@ ggplot2::ggsave(
 
 # fit two different gams to demonstrate statistical modelling approaches
 gam_2nd_order <- mgcv::gam(
-  formula = as.formula(log(value) ~ s(time, bs="tp", m=2, k=30)),
+  formula = as.formula(value ~ s(time, bs="tp", m=1, k=round(max_time/30))),
   data = transform_data_raw |>
     dplyr::filter(compartment == "proxy",
                   value !=0),
-  family=gaussian(link="identity")
+  family=Gamma
 )
 
 gam_2nd_order_results <- gratia::add_fitted_samples(object = transform_data_raw |>
                                                       dplyr::filter(compartment == "proxy"),
                                                     model=gam_2nd_order,
+                                                    scale = "response",
                                                     method="mh",
-                                                    scale="response",
-                                                    n=1000) |>
+                                                    n=2000) |>
   dplyr::summarise(
-    q50=exp(quantile(.fitted, 0.5)),
-    q95=exp(quantile(.fitted, 0.95)),
-    q5=exp(quantile(.fitted, 0.05)),
+    q50=(quantile(.fitted, 0.5)),
+    q95=(quantile(.fitted, 0.95)),
+    q5=(quantile(.fitted, 0.05)),
     .by=c(time, compartment, demography_group)) |>
   dplyr::mutate(model = "GAM 2nd order TP")
 
 gam_1st_order <- mgcv::gam(
-  formula = as.formula(log(value) ~ s(time, bs="tp", m=1, k=30)),
+  formula = as.formula(value ~ s(time, bs="tp", m=2, k=round(max_time/15))),
   data = transform_data_raw |>
     dplyr::filter(compartment == "proxy",
                   value !=0),
-  family=gaussian(link = "identity")
+  family=Gamma
 )
 
 gam_1st_order_results <- gratia::add_fitted_samples(object = transform_data_raw |>
@@ -458,11 +458,11 @@ gam_1st_order_results <- gratia::add_fitted_samples(object = transform_data_raw 
                                                     model=gam_1st_order,
                                                     scale="response",
                                                     method="mh",
-                                                    n=1000) |>
+                                                    n=2000) |>
   dplyr::summarise(
-    q50=exp(quantile(.fitted, 0.5)),
-    q95=exp(quantile(.fitted, 0.95)),
-    q5=exp(quantile(.fitted, 0.05)),
+    q50=(quantile(.fitted, 0.5)),
+    q95=(quantile(.fitted, 0.95)),
+    q5=(quantile(.fitted, 0.05)),
     .by=c(time, compartment, demography_group)) |>
   dplyr::mutate(model = "GAM 1st order TP")
 
