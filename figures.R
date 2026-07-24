@@ -65,7 +65,7 @@ uk_population <- population(
 )
 
 
-max_time <- 300
+max_time <- 350
 
 # run an epidemic model using `epidemic`
 output <- model_default(
@@ -425,7 +425,7 @@ ggplot2::ggsave(
 
 # fit two different gams to demonstrate statistical modelling approaches
 gam_2nd_order <- mgcv::gam(
-  formula = as.formula(value ~ s(time, bs="tp", m=1, k=round(max_time/30))),
+  formula = as.formula(value ~ s(time, bs="tp", m=1, k=round(max_time/20))),
   data = transform_data_raw |>
     dplyr::filter(compartment == "proxy",
                   value !=0),
@@ -446,7 +446,7 @@ gam_2nd_order_results <- gratia::add_fitted_samples(object = transform_data_raw 
   dplyr::mutate(model = "GAM 2nd order TP")
 
 gam_1st_order <- mgcv::gam(
-  formula = as.formula(value ~ s(time, bs="tp", m=2, k=round(max_time/15))),
+  formula = as.formula(value ~ s(time, bs="tp", m=2, k=round(max_time/20))),
   data = transform_data_raw |>
     dplyr::filter(compartment == "proxy",
                   value !=0),
@@ -505,7 +505,7 @@ smooth_data <- transform_data_raw |>
     proxy_smooth_7_right = zoo::rollmean(x = proxy, k = 7, align = "right", na.pad = TRUE),
     proxy_smooth_21_right = zoo::rollmean(x = proxy, k = 21, align = "right", na.pad = TRUE),
     proxy_loess = stats::loess(proxy ~ time, span = 0.1) |>
-      stats::predict(data.frame(time = seq(1, max_time + 1, 1)))
+      stats::predict(data.frame(time = seq(1, dplyr::n(), 1)))
   ) |>
   tidyr::pivot_longer(cols = dplyr::contains("proxy"))
 
