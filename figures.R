@@ -106,7 +106,7 @@ incidence |>
 # Lets assume cases are 20% of infections, and identified a on average 5 days after exposure
 
 icr <- 0.2
-case_identification_delay_shape <- 5
+case_identification_delay_shape <- 4
 
 
 cases <- incidence |>
@@ -127,7 +127,7 @@ cases
 ## Generate revisions triangle #####
 
 # use a gamma distribution for reporting delay
-report_delay_shape <- 7
+report_delay_shape <- 5
 report_delay_rate <- 1
 
 # The 'time' that the real-time analysis is conducted in the simulation
@@ -277,6 +277,181 @@ transform_data_raw <- dplyr::bind_rows(proxy, reported_cases_all) |>
   ) |>
   dplyr::mutate(demography_group = "combined")
 
+
+# Smoothing & Denoising ####
+# lets take the indicator variable and apply a range of smoothing methods then visualise.
+
+
+# fit two different gams to demonstrate statistical modelling approaches
+gam_2nd_order <- mgcv::gam(
+  formula = as.formula(value ~ s(time, bs="tp", m=1, k=round(max_time/20))),
+  data = transform_data_raw |>
+    dplyr::filter(compartment == "proxy",
+                  value !=0),
+  family=Gamma(link="log")
+)
+
+gam_2nd_order_results <- gratia::add_fitted_samples(object = transform_data_raw |>
+                                                      dplyr::filter(compartment == "proxy"),
+                                                    model=gam_2nd_order,
+                                                    scale = "response",
+                                                    method="mh",
+                                                    n=2000) |>
+  dplyr::summarise(
+    q50=(quantile(.fitted, 0.5)),
+    q95=(quantile(.fitted, 0.95)),
+    q5=(quantile(.fitted, 0.05)),
+    .by=c(time, compartment, demography_group)) |>
+  dplyr::mutate(model = "GAM 2nd order TP")
+
+gam_1st_order <- mgcv::gam(
+  formula = as.formula(value ~ s(time, bs="tp", m=2, k=round(max_time/20))),
+  data = transform_data_raw |>
+    dplyr::filter(compartment == "proxy",
+                  value !=0),
+  family=Gamma(link="log")
+)
+
+gam_1st_order_results <- gratia::add_fitted_samples(object = transform_data_raw |>
+                                                      dplyr::filter(compartment == "proxy"),
+                                                    model=gam_1st_order,
+                                                    scale="response",
+                                                    method="mh",
+                                                    n=2000) |>
+  dplyr::summarise(
+    q50=(quantile(.fitted, 0.5)),
+    q95=(quantile(.fitted, 0.95)),
+    q5=(quantile(.fitted, 0.05)),
+    .by=c(time, compartment, demography_group)) |>
+  dplyr::mutate(model = "GAM 1st order TP")
+
+gam_signal <- mgcv::gam(
+  formula = as.formula(value ~ s(time, bs="tp", m=1, k=round(max_time/20))),
+  data = transform_data_raw |>
+    dplyr::filter(compartment == "cases", demography_group=="combined"),
+  family=Gamma(link="log")
+)
+
+gam_signal_results <- gratia::add_fitted_samples(object = transform_data_raw |>
+                                                      dplyr::filter(compartment == "cases",
+                                                                    demography_group == "combined"),
+                                                    model=gam_signal,
+                                                    scale="response",
+                                                    method="mh",
+                                                    n=2000) |>
+  dplyr::summarise(
+    q50=(quantile(.fitted, 0.5)),
+    q95=(quantile(.fitted, 0.95)),
+    q5=(quantile(.fitted, 0.05)),
+    .by=c(time, compartment, demography_group)) |>
+  dplyr::mutate(model = "Signal") |>
+  dplyr::left_join(transform_data_raw |>
+                     dplyr::filter(compartment == "cases",
+                                   demography_group == "combined") |>
+                     dplyr::select(-c(compartment, compartment_name)) |>
+                     dplyr::rename(cases=value),
+                   by=c("time", "demography_group"))
+
+
+gam_signal_results |>
+  ggplot() +
+  geom_line(aes(x=time, y=q50, color="Median estimate")) +
+  geom_line(aes(x=time, y=cases, color="Cases"), linewidth=0.8) +
+  geom_ribbon(aes(x=time, ymin=q5, ymax=q95, fill="90% confidence interval"), alpha=0.5) +
+  coord_cartesian(xlim = c(90, 220)) +
+  scale_fill_brewer(palette="Set1") +
+  scale_color_brewer(palette="Set1") +
+  labs(y = "Cases", x = "Day") +
+  theme(legend.position = "bottom")
+
+gam_indicator_results <- dplyr::bind_rows(
+  gam_1st_order_results,
+  gam_2nd_order_results
+) |>
+  dplyr::select(-compartment) |>
+  dplyr::left_join(transform_data_raw |>
+                     dplyr::filter(compartment == "proxy") |>
+                     dplyr::select(-compartment) |>
+                     dplyr::rename(proxy=value),
+                   by=c("time", "demography_group"))
+
+gam_indicator_plot <- gam_indicator_results |>
+  ggplot() +
+  geom_line(aes(x=time, y=proxy), linewidth=0.8, color="black") +
+  geom_line(aes(x=time, y=q50, group=model, color=model)) +
+  geom_ribbon(aes(x=time, ymin=q5, ymax=q95, group=model, fill=model), alpha=0.5) +
+  coord_cartesian(xlim = c(90, 220)) +
+  scale_fill_brewer(palette="Set1") +
+  labs(y = "Indicator value", x = "Day",
+       title="B.") +
+  theme(legend.position = "bottom")
+
+gam_indicator_plot
+
+smooth_data <- transform_data_raw |>
+  dplyr::select(-compartment_name) |>
+  tidyr::pivot_wider(values_from = value, names_from = compartment) |>
+  # cases can be NA because of the time shift from incidence to case
+  tidyr::replace_na(list(cases = 0)) |>
+  dplyr::arrange(time) |>
+  dplyr::mutate(
+    # we want methods that will produce a clear visual difference
+    proxy_smooth_7_right = zoo::rollmean(x = proxy, k = 7, align = "right", na.pad = TRUE),
+    proxy_smooth_21_right = zoo::rollmean(x = proxy, k = 21, align = "right", na.pad = TRUE),
+    proxy_loess = stats::loess(proxy ~ time, span = 0.1) |>
+      stats::predict(data.frame(time = seq(1, dplyr::n(), 1)))
+  ) |>
+  tidyr::pivot_longer(cols = dplyr::contains("proxy"))
+
+
+
+# create plot that emphasises the smooth methods not the raw
+smooth_plot <- smooth_data |>
+  ggplot() +
+  geom_line(aes(x = time, y = value, group = name, color = name), linewidth = 0.8) +
+  coord_cartesian(xlim = c(90, 220)) +
+  scale_color_manual(
+    name = "Smoothing method",
+    labels = c(
+      "proxy" = "Raw data",
+      "proxy_loess" = "LOESS",
+      "proxy_smooth_7_right" = "Right aligned 7 day rolling average",
+      "proxy_smooth_21_right" = "Right aligned 21 day rolling average"
+    ),
+    values = c(
+      # take colours from Brewer Set1
+      "proxy" = "black",
+      "proxy_loess" = "#E41A1C",
+      "proxy_smooth_7_right" = "#377EB8",
+      "proxy_smooth_21_right" = "#984EA3"
+    )
+  ) +
+  labs(y = "Indicator value", x = "Day",
+       title = "A.") +
+  theme(legend.position = "bottom")
+
+smooth_plot
+
+
+final_smooth_plot <- smooth_plot / gam_indicator_plot
+
+final_smooth_plot
+
+ggplot2::ggsave(
+  filename = fs::path(output_dir, "smooth.png"),
+  plot = final_smooth_plot,
+  width = 10,
+  height = 14
+)
+
+ggplot2::ggsave(
+  filename = fs::path(output_dir_tiff, "smooth.tiff"),
+  plot = final_smooth_plot,
+  width = 10,
+  height = 8
+)
+
+
 # the proxy indicator is aligned with incidence (with some weighting across ages)
 # and the reported cases are mean(time to report) + mean(reporting delay) days delayed from incidence.
 
@@ -335,65 +510,158 @@ transform_data |>
   geom_line(aes(x = time, y = proxy_gr, color = "proxy")) +
   geom_line(aes(x = time, y = cases_gr, color = "cases"))
 
+# Estimate growth rates
+gam_indicator_gr <- gratia::derivative_samples(data = transform_data_raw |>
+                                                      dplyr::filter(compartment == "proxy"),
+                                                    focal="time",
+                                                    object=gam_1st_order,
+                                                    scale="linear_predictor",
+                                                    method="mh",
+                                                    n=2000) |>
+  dplyr::summarise(
+    q50=(quantile(.derivative, 0.5)),
+    q95=(quantile(.derivative, 0.95)),
+    q5=(quantile(.derivative, 0.05)),
+    .by=c(time)) |>
+  dplyr::mutate(model = "Indicator")
+
+gam_signal_gr <- gratia::derivative_samples(data = transform_data_raw |>
+                                                 dplyr::filter(compartment == "cases",
+                                                               demography_group=="combined"),
+                                               focal="time",
+                                               object=gam_signal,
+                                               scale="linear_predictor",
+                                               method="mh",
+                                               n=2000) |>
+  dplyr::summarise(
+    q50=(quantile(.derivative, 0.5)),
+    q95=(quantile(.derivative, 0.95)),
+    q5=(quantile(.derivative, 0.05)),
+    .by=c(time)) |>
+  dplyr::mutate(model = "Signal")
+
+gam_gr_results <- dplyr::bind_rows(
+  gam_signal_gr,
+  gam_indicator_gr
+)
+
+gr_plot <- gam_gr_results |>
+  ggplot() +
+  geom_hline(aes(yintercept=0), linetype=2) +
+  geom_ribbon(aes(x=time, ymin=q5, ymax=q95, group=model, fill=model), alpha=0.5) +
+  geom_line(aes(x=time, y=q50, group=model, color=model)) +
+  scale_y_continuous(labels=scales::percent) +
+  coord_cartesian(ylim=c(-0.1, 0.1),
+                  xlim = c(50, 250)) +
+  labs(y="Daily growth rate",
+       x="Day") +
+  scale_fill_brewer(palette="Set1")+
+  scale_color_brewer(palette="Set1") +
+  theme(legend.position = "bottom")
+
+gr_plot
+
+gam_gr_results_wide <- gam_gr_results |>
+  dplyr::mutate(model = stringr::str_to_lower(model)) |>
+  tidyr::pivot_wider(names_from=model, values_from = dplyr::starts_with("q")) |>
+  dplyr::arrange(time) |>
+  dplyr::filter(time >= 50,
+                time <= 250)
+
+
+
+
 
 # calculate the ccfs with bootstrap.
 # Set a maximum order of zero so tha the AR process is only on the
-# 'natural' scale of the data passed in.
-ccf_natural_results <- funtimes::ccf_boot(
-  x = transform_data$proxy,
-  y = transform_data$cases,
+# raw natural scale
+
+transform_data_clipped <- transform_data |>
+  dplyr::filter(time >= 50,
+                time <= 250)
+
+# bring signal and indicator together from modelled estimate
+smooth_results <- dplyr::bind_rows(
+  gam_signal_results,
+  gam_indicator_results |>
+    dplyr::filter(model == "GAM 1st order TP") |>
+    dplyr::mutate(model= "Indicator")
+) |>
+  dplyr::select(-c(cases, proxy, compartment_name, compartment, demography_group)) |>
+  dplyr::mutate(model = stringr::str_to_lower(model)) |>
+  tidyr::pivot_wider(names_from=model, values_from= dplyr::starts_with("q")) |>
+  dplyr::arrange(time) |>
+  dplyr::filter(time >= 50,
+                time <= 250)
+
+ccf_raw_results <- funtimes::ccf_boot(
+  x = transform_data_clipped$proxy,
+  y = transform_data_clipped$cases,
   ar.order = 0,
-  lag.max = 30,
+  lag.max = 40,
   plot = "none"
 ) |>
-  dplyr::mutate(scale = "natural")
+  dplyr::mutate(scale = "raw")
 
+# smoothed natural scale
+ccf_smooth_results <- funtimes::ccf_boot(
+  x = smooth_results$q50_indicator,
+  y = smooth_results$q50_signal,
+  ar.order = 0,
+  lag.max = 40,
+  ic="none",
+  plot = "none"
+) |>
+  dplyr::mutate(scale = "smooth")
+
+# log scaled from smooth
 ccf_log_results <- funtimes::ccf_boot(
-  x = transform_data$proxy_log,
-  y = transform_data$cases_log,
+  x = log(smooth_results$q50_indicator),
+  y = log(smooth_results$q50_signal),
   ar.order = 0,
-  lag.max = 30,
+  lag.max = 40,
+  ic="none",
   plot = "none"
 ) |>
-  dplyr::mutate(scale = "log")
+  dplyr::mutate(scale = "smooth log")
 
+# growth rate from smooth
 ccf_gr_results <- funtimes::ccf_boot(
-  x = transform_data$proxy_gr,
-  y = transform_data$cases_gr,
+  x = gam_gr_results_wide$q50_indicator,
+  y = gam_gr_results_wide$q50_signal,
   ar.order = 0,
-  lag.max = 30,
+  lag.max = 40,
+  ic="none",
   plot = "none"
 ) |>
   dplyr::mutate(scale = "growth rate")
 
+
+
+
 ccf_results <- dplyr::bind_rows(
-  ccf_natural_results,
+  ccf_raw_results,
+  ccf_smooth_results,
   ccf_log_results,
   ccf_gr_results
 ) |>
-  dplyr::mutate(is_max = r_P == max(r_P), .by = scale) |>
-  dplyr::mutate(scale = factor(scale, levels = c("natural", "log", "growth rate")))
+  # choose spearman or pearson statistic
+  dplyr::mutate(scale = factor(scale, levels = c("raw", "smooth", "smooth log", "growth rate")))
 
 ccf_plot <- ccf_results |>
   ggplot() +
   geom_hline(aes(yintercept = 0), linetype = 5) +
-  geom_ribbon(aes(x = Lag, ymin = lower_P, ymax = upper_P, fill = "CI"), alpha = 0.2) +
-  geom_linerange(aes(x = Lag, ymin = 0, ymax = r_P, color = is_max), alpha = 0.5) +
-  geom_point(aes(x = Lag, y = r_P, color = is_max)) +
+  geom_ribbon(aes(x = Lag, ymin = lower_S, ymax = upper_S, fill = "CI"), alpha = 0.2) +
+  geom_linerange(aes(x = Lag, ymin = 0, ymax = r_S), alpha = 0.5) +
+  geom_point(aes(x = Lag, y = r_S)) +
 
-  coord_cartesian(ylim = c(-0.5, 1), xlim = c(-30, 15)) +
-  scale_x_continuous(breaks = seq(-30, 30, 5)) +
+  coord_cartesian(ylim = c(-0.5, 1), xlim = c(-40, 40)) +
+  scale_x_continuous(breaks = seq(-40, 40, 5)) +
   labs(
-    y = "Pearson correlation",
+    y = "Spearman correlation",
     x = "Lag (days)",
     title = "B.",
     subtitle = "The cross correlation estimated varies depending on the transformation applied."
-  ) +
-  scale_color_manual(
-    name = NULL,
-    values = c("TRUE" = "red", "FALSE" = "darkblue"),
-    labels = c("TRUE" = "Maximum correlation"),
-    breaks = c(TRUE)
   ) +
   scale_fill_manual(name = NULL, values = c("CI" = "black"), labels = c("CI" = "95% significance threshold")) +
   theme(legend.position = "bottom") +
@@ -402,6 +670,8 @@ ccf_plot <- ccf_results |>
 ccf_plot
 
 transformation_plot <- proxy_plot / ccf_plot
+
+transformation_plot
 
 ggplot2::ggsave(
   filename = fs::path(output_dir, "transformation.png"),
@@ -419,138 +689,3 @@ ggplot2::ggsave(
 
 
 
-# Smoothing & Denoising ####
-# lets take the indicator variable and apply a range of smoothing methods then visualise.
-
-
-# fit two different gams to demonstrate statistical modelling approaches
-gam_2nd_order <- mgcv::gam(
-  formula = as.formula(value ~ s(time, bs="tp", m=1, k=round(max_time/20))),
-  data = transform_data_raw |>
-    dplyr::filter(compartment == "proxy",
-                  value !=0),
-  family=Gamma
-)
-
-gam_2nd_order_results <- gratia::add_fitted_samples(object = transform_data_raw |>
-                                                      dplyr::filter(compartment == "proxy"),
-                                                    model=gam_2nd_order,
-                                                    scale = "response",
-                                                    method="mh",
-                                                    n=2000) |>
-  dplyr::summarise(
-    q50=(quantile(.fitted, 0.5)),
-    q95=(quantile(.fitted, 0.95)),
-    q5=(quantile(.fitted, 0.05)),
-    .by=c(time, compartment, demography_group)) |>
-  dplyr::mutate(model = "GAM 2nd order TP")
-
-gam_1st_order <- mgcv::gam(
-  formula = as.formula(value ~ s(time, bs="tp", m=2, k=round(max_time/20))),
-  data = transform_data_raw |>
-    dplyr::filter(compartment == "proxy",
-                  value !=0),
-  family=Gamma
-)
-
-gam_1st_order_results <- gratia::add_fitted_samples(object = transform_data_raw |>
-                                                      dplyr::filter(compartment == "proxy"),
-                                                    model=gam_1st_order,
-                                                    scale="response",
-                                                    method="mh",
-                                                    n=2000) |>
-  dplyr::summarise(
-    q50=(quantile(.fitted, 0.5)),
-    q95=(quantile(.fitted, 0.95)),
-    q5=(quantile(.fitted, 0.05)),
-    .by=c(time, compartment, demography_group)) |>
-  dplyr::mutate(model = "GAM 1st order TP")
-
-
-
-
-
-gam_results <- dplyr::bind_rows(
-  gam_1st_order_results,
-  gam_2nd_order_results
-) |>
-  dplyr::select(-compartment) |>
-  dplyr::left_join(transform_data_raw |>
-                     dplyr::filter(compartment == "proxy") |>
-                     dplyr::select(-compartment) |>
-                     dplyr::rename(proxy=value),
-                   by=c("time", "demography_group"))
-
-gam_plot <- gam_results |>
-  ggplot() +
-  geom_line(aes(x=time, y=proxy), linewidth=0.8, color="black") +
-  geom_line(aes(x=time, y=q50, group=model, color=model)) +
-  geom_ribbon(aes(x=time, ymin=q5, ymax=q95, group=model, fill=model), alpha=0.5) +
-  coord_cartesian(xlim = c(90, 220)) +
-  scale_fill_brewer(palette="Set1") +
-  labs(y = "Indicator value", x = "Day",
-       title="B.") +
-  theme(legend.position = "bottom")
-
-gam_plot
-
-smooth_data <- transform_data_raw |>
-  dplyr::select(-compartment_name) |>
-  tidyr::pivot_wider(values_from = value, names_from = compartment) |>
-  # cases can be NA because of the time shift from incidence to case
-  tidyr::replace_na(list(cases = 0)) |>
-  dplyr::arrange(time) |>
-  dplyr::mutate(
-    # we want methods that will produce a clear visual difference
-    proxy_smooth_7_right = zoo::rollmean(x = proxy, k = 7, align = "right", na.pad = TRUE),
-    proxy_smooth_21_right = zoo::rollmean(x = proxy, k = 21, align = "right", na.pad = TRUE),
-    proxy_loess = stats::loess(proxy ~ time, span = 0.1) |>
-      stats::predict(data.frame(time = seq(1, dplyr::n(), 1)))
-  ) |>
-  tidyr::pivot_longer(cols = dplyr::contains("proxy"))
-
-
-
-# create plot that emphasises the smooth methods not the raw
-smooth_plot <- smooth_data |>
-  ggplot() +
-  geom_line(aes(x = time, y = value, group = name, color = name), linewidth = 0.8) +
-  coord_cartesian(xlim = c(90, 220)) +
-  scale_color_manual(
-    name = "Smoothing method",
-    labels = c(
-      "proxy" = "Raw data",
-      "proxy_loess" = "LOESS",
-      "proxy_smooth_7_right" = "Right aligned 7 day rolling average",
-      "proxy_smooth_21_right" = "Right aligned 21 day rolling average"
-    ),
-    values = c(
-      # take colours from Brewer Set1
-      "proxy" = "black",
-      "proxy_loess" = "#E41A1C",
-      "proxy_smooth_7_right" = "#377EB8",
-      "proxy_smooth_21_right" = "#984EA3"
-    )
-  ) +
-  labs(y = "Indicator value", x = "Day",
-       title = "A.") +
-  theme(legend.position = "bottom")
-
-smooth_plot
-
-
-final_smooth_plot <- smooth_plot / gam_plot
-
-ggplot2::ggsave(
-  filename = fs::path(output_dir, "smooth.png"),
-  plot = final_smooth_plot,
-  width = 10,
-  height = 14
-)
-
-ggplot2::ggsave(
-  filename = fs::path(output_dir_tiff, "smooth.tiff"),
-  plot = final_smooth_plot,
-  width = 10,
-  height = 8
-)
