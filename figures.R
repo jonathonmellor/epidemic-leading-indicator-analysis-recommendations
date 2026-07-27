@@ -457,7 +457,7 @@ ggplot2::ggsave(
 
 proxy_plot <- transform_data_raw |>
   ggplot() +
-  coord_cartesian(xlim = c(100, 250)) +
+  coord_cartesian(xlim = c(50, 250)) +
   geom_line(aes(x = time, y = value, color = compartment)) +
   facet_grid(rows = vars(compartment_name), scales = "free_y") +
   theme(legend.position = "bottom") +
@@ -555,8 +555,8 @@ gr_plot <- gam_gr_results |>
                   xlim = c(50, 250)) +
   labs(y="Daily growth rate",
        x="Day") +
-  scale_fill_brewer(palette="Set1")+
-  scale_color_brewer(palette="Set1") +
+  scale_color_manual(name=NULL, values = c("Signal" = "maroon4", "Indicator" = "darkorange"), ) +
+  scale_fill_manual(name=NULL,values = c("Signal" = "maroon4", "Indicator" = "darkorange"), ) +
   theme(legend.position = "bottom")
 
 gr_plot
@@ -649,13 +649,14 @@ ccf_results <- dplyr::bind_rows(
   dplyr::mutate(scale = factor(scale, levels = c("raw", "smooth", "smooth log", "growth rate")))
 
 ccf_plot <- ccf_results |>
+  dplyr::mutate(scale = stringr::str_wrap(scale, width = 8)) |>
   ggplot() +
   geom_hline(aes(yintercept = 0), linetype = 5) +
   geom_ribbon(aes(x = Lag, ymin = lower_S, ymax = upper_S, fill = "CI"), alpha = 0.2) +
   geom_linerange(aes(x = Lag, ymin = 0, ymax = r_S), alpha = 0.5) +
   geom_point(aes(x = Lag, y = r_S)) +
 
-  coord_cartesian(ylim = c(-0.5, 1), xlim = c(-40, 40)) +
+  coord_cartesian(ylim = c(-0.3, 1), xlim = c(-40, 40)) +
   scale_x_continuous(breaks = seq(-40, 40, 5)) +
   labs(
     y = "Spearman correlation",
@@ -669,7 +670,8 @@ ccf_plot <- ccf_results |>
 
 ccf_plot
 
-transformation_plot <- proxy_plot / ccf_plot
+transformation_plot <- ((proxy_plot / gr_plot) + patchwork::plot_layout(axes="collect")) / ccf_plot
+
 
 transformation_plot
 
