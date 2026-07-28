@@ -329,7 +329,7 @@ gam_signal <- mgcv::gam(
   formula = as.formula(value ~ s(time, bs="tp", m=1, k=round(max_time/20))),
   data = transform_data_raw |>
     dplyr::filter(compartment == "cases", demography_group=="combined"),
-  family=Gamma(link="log")
+  family="nb"
 )
 
 gam_signal_results <- gratia::add_fitted_samples(object = transform_data_raw |>
@@ -554,7 +554,9 @@ gr_plot <- gam_gr_results |>
   coord_cartesian(ylim=c(-0.1, 0.1),
                   xlim = c(50, 250)) +
   labs(y="Daily growth rate",
-       x="Day") +
+       x="Day",
+       subtitle="The estimated growth rate varies across indicator and signal over time.",
+       title="B.") +
   scale_color_manual(name=NULL, values = c("Signal" = "maroon4", "Indicator" = "darkorange"), ) +
   scale_fill_manual(name=NULL,values = c("Signal" = "maroon4", "Indicator" = "darkorange"), ) +
   theme(legend.position = "bottom")
@@ -646,22 +648,20 @@ ccf_results <- dplyr::bind_rows(
   ccf_gr_results
 ) |>
   # choose spearman or pearson statistic
-  dplyr::mutate(scale = factor(scale, levels = c("raw", "smooth", "smooth log", "growth rate")))
+  dplyr::mutate(scale = factor(stringr::str_wrap(scale, width = 8), levels = c("raw", "smooth", "smooth\nlog", "growth\nrate")))
 
 ccf_plot <- ccf_results |>
-  dplyr::mutate(scale = stringr::str_wrap(scale, width = 8)) |>
   ggplot() +
   geom_hline(aes(yintercept = 0), linetype = 5) +
   geom_ribbon(aes(x = Lag, ymin = lower_S, ymax = upper_S, fill = "CI"), alpha = 0.2) +
   geom_linerange(aes(x = Lag, ymin = 0, ymax = r_S), alpha = 0.5) +
-  geom_point(aes(x = Lag, y = r_S)) +
-
+  geom_point(aes(x = Lag, y = r_S), size=0.75) +
   coord_cartesian(ylim = c(-0.3, 1), xlim = c(-40, 40)) +
   scale_x_continuous(breaks = seq(-40, 40, 5)) +
   labs(
     y = "Spearman correlation",
     x = "Lag (days)",
-    title = "B.",
+    title = "C.",
     subtitle = "The cross correlation estimated varies depending on the transformation applied."
   ) +
   scale_fill_manual(name = NULL, values = c("CI" = "black"), labels = c("CI" = "95% significance threshold")) +
@@ -670,7 +670,9 @@ ccf_plot <- ccf_results |>
 
 ccf_plot
 
-transformation_plot <- ((proxy_plot / gr_plot) + patchwork::plot_layout(axes="collect")) / ccf_plot
+transformation_plot <- (((proxy_plot / gr_plot) +
+                           patchwork::plot_layout(axes="collect")) / ccf_plot) +
+  patchwork::plot_layout(height=c(1.3, 1.3, 2))
 
 
 transformation_plot
@@ -690,4 +692,152 @@ ggplot2::ggsave(
 )
 
 
+# Uncertainty ######
+# Demonstrate uncertainty by comparing different peak timings
 
+signal_samples <- gratia::add_fitted_samples(object = transform_data_raw |>
+                             dplyr::filter(compartment == "cases",
+                                           demography_group == "combined"),
+                           model=gam_signal,
+                           scale="response",
+                           method="mh",
+                           n=500) |>
+  dplyr::select(time, .fitted, .draw) |>
+  dplyr::mutate(metric="Signal")
+
+indicator_1st_order_samples <- gratia::add_fitted_samples(object = transform_data_raw |>
+                                                      dplyr::filter(compartment == "proxy"),
+                                                    model=gam_1st_order,
+                                                    scale="response",
+                                                    method="mh",
+                                                    n=500) |>
+  dplyr::select(time, .fitted, .draw) |>
+  dplyr::mutate(metric="indicator_model_1")
+
+indicator_2nd_order_samples <- gratia::add_fitted_samples(object = transform_data_raw |>
+                                                            dplyr::filter(compartment == "proxy"),
+                                                          model=gam_2nd_order,
+                                                          scale="response",
+                                                          method="mh",
+                                                          n=500) |>
+  dplyr::select(time, .fitted, .draw) |>
+  dplyr::mutate(metric="indicator_model_2")
+
+sample_results <- dplyr::bind_rows(
+  signal_samples,
+  indicator_1st_order_samples,
+  indicator_2nd_order_samples
+)
+
+peak_samples <- sample_results |>
+  # This assumes no ties in max value
+  dplyr::filter(.fitted == max(.fitted, na.rm=TRUE), .by=c(metric, .draw))
+
+peak_estimate <- peak_samples |>
+  dplyr::mutate(metric = dplyr::recode(
+    metric,
+    "indicator_model_1" = "Indicator\n(GAM 1st order TP)",
+    "indicator_model_2" = "Indicator\n(GAM 2nd order TP)",
+  ))|>
+  dplyr::mutate(metric = factor(metric, levels = c("Signal", "Indicator\n(GAM 1st order TP)", "Indicator\n(GAM 2nd order TP)")))
+
+
+difference_samples <- peak_samples |>
+  dplyr::mutate(metric = stringr::str_to_lower(metric)) |>
+  tidyr::pivot_wider(id_cols = .draw, names_from = metric, values_from = time) |>
+  dplyr::mutate(diff_model_1 = signal - indicator_model_1,
+                diff_model_2 = signal - indicator_model_2) |>
+
+  tidyr::pivot_longer(cols = dplyr::starts_with("diff")) |>
+  dplyr::mutate(metric = stringr::str_remove(name, "diff_")) |>
+  dplyr::select(-name) |>
+  dplyr::mutate(metric = dplyr::recode(
+    metric,
+    "model_1" = "Indicator\n(GAM 1st order TP)",
+    "model_2" = "Indicator\n(GAM 2nd order TP)",
+  )) |>
+  dplyr::mutate(metric = factor(metric, levels = c("Signal", "Indicator\n(GAM 1st order TP)", "Indicator\n(GAM 2nd order TP)")))
+
+signal_col <- "#E41A1C"
+indication1_col <- "#377EB8"
+indication2_col <- "#984EA3"
+
+
+wave_plot <- sample_results |>
+  dplyr::mutate(metric = dplyr::recode(
+    metric,
+    "indicator_model_1" = "Indicator\n(GAM 1st order TP)",
+    "indicator_model_2" = "Indicator\n(GAM 2nd order TP)",
+  )) |>
+  dplyr::mutate(metric = factor(metric, levels = c("Signal", "Indicator\n(GAM 1st order TP)", "Indicator\n(GAM 2nd order TP)")))|>
+  ggplot() +
+  geom_line(aes(x=time, y=.fitted, group=.draw, color=metric), alpha=0.01) +
+  facet_grid(rows=vars(metric), scales="free_y") +
+  coord_cartesian(xlim=c(50,250)) +
+  labs(title = "A.",
+       x="Day",
+       y=NULL) +
+  scale_color_manual(values = c(
+    "Signal"=signal_col,
+    "Indicator\n(GAM 1st order TP)" = indication1_col,
+    "Indicator\n(GAM 2nd order TP)" = indication2_col
+  )) +
+  guides(color="none")
+
+wave_plot
+
+
+peak_timing_plot <- peak_estimate |>
+  ggplot() +
+  ggdist::stat_pointinterval(aes(x=time, y=metric, color=metric)) +
+  labs(title = "B.",
+       x="Estimated peak day",
+       y=NULL) +
+  theme(legend.position = "bottom") +
+  scale_color_manual(values = c(
+    "Signal"=signal_col,
+    "Indicator\n(GAM 1st order TP)" = indication1_col,
+    "Indicator\n(GAM 2nd order TP)" = indication2_col
+  )) +
+  guides(color="none") +
+  scale_y_discrete(limits=rev)
+
+peak_timing_plot
+
+lead_time_plot <- difference_samples |>
+  ggplot() +
+  ggdist::stat_slabinterval(aes(x=value, y=metric, color=metric),
+                            density="histogram",
+                            breaks=seq(10,26, 1)) +
+  scale_x_continuous(breaks=seq(10, 30, 2)) +
+  labs(title = "C.",
+       x="Estimated peak difference (days)",
+       y=NULL) +
+  theme(legend.position = "bottom") +
+  scale_color_manual(values = c(
+    "Signal"=signal_col,
+    "Indicator\n(GAM 1st order TP)" = indication1_col,
+    "Indicator\n(GAM 2nd order TP)" = indication2_col
+  )) +
+  guides(color="none")+
+  scale_y_discrete(limits=rev)
+
+lead_time_plot
+
+uncertainty_plot <- wave_plot / peak_timing_plot / lead_time_plot + patchwork::plot_layout(heights=c(1, 0.5, 0.5))
+
+uncertainty_plot
+
+ggplot2::ggsave(
+  filename = fs::path(output_dir, "uncertainty.png"),
+  plot = uncertainty_plot,
+  width = 8,
+  height = 10
+)
+
+ggplot2::ggsave(
+  filename = fs::path(output_dir_tiff, "uncertainty.tiff"),
+  plot = uncertainty_plot,
+  width = 8,
+  height = 10
+)
