@@ -20,6 +20,8 @@ set.seed(07734)
 
 output_dir <- fs::dir_create(here::here("outputs"))
 output_dir_tiff <- fs::dir_create(here::here("outputs", "tiff"))
+output_dir_supp <- fs::dir_create(here::here("outputs", "supp"))
+
 # Generate epidemic ####
 
 polymod <- socialmixr::polymod
@@ -96,9 +98,14 @@ incidence <- raw_incidence |>
   dplyr::bind_rows(raw_incidence)
 
 # QA check the incidence curves
-incidence |>
+incidence_plot <- incidence |>
   ggplot() +
-  geom_line(aes(x = time, y = value, group = demography_group, color = demography_group))
+  geom_line(aes(x = time, y = value/100000, group = demography_group, color = demography_group)) +
+  labs(y="New infections (per 100k)",
+       x="Days") +
+  theme(legend.position = "bottom") +
+  scale_color_brewer(name="Demography group",
+                     palette="Set1")
 
 
 # Reporting delays and backfilling ####
