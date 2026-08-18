@@ -266,6 +266,18 @@ max_los <- 50
 length_of_stay_shape_short <- 4
 length_of_stay_shape_long <- 14
 
+short_cdf <- stats::pgamma(
+  q = seq(0, max_los),
+  shape = length_of_stay_shape_short,
+  rate = 1
+)
+
+long_cdf <- stats::pgamma(
+  q = seq(0, max_los),
+  shape = length_of_stay_shape_long,
+  rate = 1
+)
+
 
 admissions <- incidence |>
   # lets assume all cases reported are in the most elderly age group
@@ -287,7 +299,7 @@ los_timings <- admissions |>
     short_los_patients = stats::rmultinom(
       n = dplyr::n(),
       size = value,
-      prob = dgamma(seq(1, max_los), shape = length_of_stay_shape_short, rate = 1)
+      prob = diff(short_cdf) / sum(diff(short_cdf))
     ) |>
       as.integer(),
     long_los_patients = stats::rmultinom(
