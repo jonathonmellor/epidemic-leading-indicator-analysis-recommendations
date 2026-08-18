@@ -50,7 +50,7 @@ country <- lad24_uk_buc |>
 regions <- sf::st_read(nhser24_en_buc_url) |>
   # Tidy column names
   janitor::clean_names() |>
-  #sf::st_as_sf() |>
+  # sf::st_as_sf() |>
   dplyr::mutate(type = "region") |>
   sf::st_set_crs(sf::st_crs(country)) |>
   sf::st_make_valid() |>
