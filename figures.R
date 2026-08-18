@@ -75,7 +75,9 @@ output <- model_default(
   time_end = max_time,
   increment = 1.0,
   # adjusted from getting started script to make epidemic shorter
-  transmission_rate = 1.8 / 7
+  transmission_rate = 1.8 / 7,
+  infectiousness_rate = 1 / 2,
+  recovery_rate = 1 / 7
 ) |>
   # remove vaccinated as irrelevant to this work
   dplyr::filter(compartment != "vaccinated") |>
@@ -255,6 +257,100 @@ ggplot2::ggsave(
   height = 9
 )
 
+# Single vs multiple events
+# Going to use hospitalisation and bed occupancy
+
+ihr <- 0.02
+exposure_to_hospitalisation_delay_shape <- 7
+max_los <- 50
+length_of_stay_shape_short <- 7
+length_of_stay_shape_long <- 21
+
+
+
+admissions <- incidence |>
+  # lets assume all cases reported are in the most elderly age group
+  dplyr::filter(demography_group == "[40,Inf)") |>
+  # we need round numbers to work at the individual level later,
+  # consider moving earlier in processing.
+  dplyr::mutate(value = rpois(n = dplyr::n(), lambda = ihr * value)) |>
+  tidyr::uncount(weights = value, .id = "id") |>
+  dplyr::mutate(
+    delay = floor(rgamma(n = dplyr::n(), shape = exposure_to_hospitalisation_delay_shape, rate = 1)),
+    time = time + delay
+  ) |>
+  dplyr::summarise(value = dplyr::n(), .by = c("time", "demography_group")) |>
+  dplyr::mutate(compartment = "new_hospitalisations")
+
+los_timings <- admissions |>
+  dplyr::reframe(
+    los = seq(1, max_los),
+    short_los_patients = stats::rmultinom(n=dplyr::n(),
+                                size = value,
+                                prob = dgamma(seq(1,max_los), shape=length_of_stay_shape_short, rate=1)) |>
+      as.integer(),
+    long_los_patients = stats::rmultinom(n=dplyr::n(),
+                                      size = value,
+                                      prob = dgamma(seq(1,max_los), shape=length_of_stay_shape_long, rate=1)) |>
+      as.integer(),
+    .by=c("time", "demography_group")
+  ) |>
+  dplyr::mutate(discharge_time = time + los) |>
+  dplyr::rename(admission_time = time)
+
+occupancy <- los_timings |>
+  # Apply an accumulating length of stay convolution
+  dplyr::reframe(
+          "time" = seq(min(los_timings$admission_time), max(los_timings$discharge_time)),
+          "beds_occupied_short_LOS" = purrr::map_int(
+            # For each $time value:
+            time,
+            # Sum the $short_los_patients values of the input frame BUT only include rows where
+            # the $time value is between the start and end times for the row
+            # (i.e. the result of the inner inequalities statement is a logical
+            # vector - when we include it in the multiplication, it's coerced to
+            # 0/1 values, so we effectively only sum the $short_los_patients values aligning with
+            # 1-values)
+            \(.) sum((. >= admission_time & . <= discharge_time) * short_los_patients)
+          ),
+          "beds_occupied_long_LOS" = purrr::map_int(
+            time,
+            \(.) sum((. >= admission_time & . <= discharge_time) * long_los_patients)
+          )
+  ) |>
+  tidyr::pivot_longer(cols = c("beds_occupied_short_LOS", "beds_occupied_long_LOS"),
+                      names_to = "compartment")
+
+hospital_metrics <- dplyr::bind_rows(
+  admissions, occupancy
+) |>
+  dplyr::mutate(norm_value = value / max(value),
+                .by=compartment) |>
+  dplyr::mutate(compartment = factor(stringr::str_replace_all(compartment, "_", " ")))
+
+raw_hosp_plot <- hospital_metrics |>
+  ggplot() +
+  geom_line(aes(x=time, y=value, color=compartment)) +
+  scale_color_brewer(name=NULL, palette = "Set1") +
+  labs(title = "A.",
+       y="Counts")
+
+raw_hosp_plot
+
+norm_hosp_plot <- hospital_metrics |>
+  ggplot() +
+  geom_line(aes(x=time, y=norm_value, color=compartment)) +
+  scale_color_brewer(name=NULL, palette = "Set1") +
+  labs(title = "B.",
+       y="Normalised counts")
+
+norm_hosp_plot
+
+(raw_hosp_plot / norm_hosp_plot) + patchwork::plot_layout(axes="collect",
+                                                          guides="collect") &
+  theme(legend.position = "bottom") & coord_cartesian(xlim=c(125,225)) & patchwork::plot_annotation(
+   title = "The beds occupied depend on the new hospitalisations and the length of stay (LOS)",
+   subtitle = glue::glue("Short LOS mean: {length_of_stay_shape_short}, Long LOS mean: {length_of_stay_shape_long}"))
 
 # Transformations
 # compare incident infections with reported cases on different scales
