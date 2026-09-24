@@ -51,6 +51,7 @@ rsconnect/
 
 # Plots
 *.png
+*.tiff
 
 # Data
 *.csv

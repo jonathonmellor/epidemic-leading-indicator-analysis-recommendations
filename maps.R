@@ -9,6 +9,8 @@ library(fs)
 
 
 output_dir <- fs::dir_create(here::here("outputs"))
+output_dir_tiff <- fs::dir_create(here::here("outputs", "tiff"))
+
 
 
 set.seed(07734)
@@ -48,7 +50,7 @@ country <- lad24_uk_buc |>
 regions <- sf::st_read(nhser24_en_buc_url) |>
   # Tidy column names
   janitor::clean_names() |>
-  #sf::st_as_sf() |>
+  # sf::st_as_sf() |>
   dplyr::mutate(type = "region") |>
   sf::st_set_crs(sf::st_crs(country)) |>
   sf::st_make_valid() |>
@@ -122,6 +124,13 @@ combined_plot
 
 ggplot2::ggsave(
   filename = fs::path(output_dir, "map.png"),
+  plot = combined_plot,
+  width = 8,
+  height = 8
+)
+
+ggplot2::ggsave(
+  filename = fs::path(output_dir_tiff, "map.tiff"),
   plot = combined_plot,
   width = 8,
   height = 8
